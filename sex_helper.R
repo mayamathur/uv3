@@ -1,9 +1,11 @@
 
+###################### FNS FOR SEX-STRATIFIED UV CURVE MODELS ###################### 
 # find order of best-fitting model
 polyfit = function(i, dat) AIC( lm( lik ~ poly(mhc, i, raw = TRUE) +
                                       mean.emot,
                                     weights = 1/(dat$lik_sd^2),
                                     data = dat ) )
+
 
 # return best-fitting poly for given subset of data
 best_model = function(dat) {
@@ -61,3 +63,34 @@ make_predframe = function(dat) {
   predframe.agg$mhc = mh.grid - mean(dat$mh)
   return(predframe.agg)
 }
+
+
+
+###################### FNS FOR SEX-STRATIFIED CATEGORY BOUNDARY MODELS ###################### 
+
+# find order of best-fitting model
+polyfit.cat = function(i, dat) x = AIC( lm( prop.human ~ poly(mhc, i, raw = TRUE) +
+                                         mean.emot,
+                                       data = dat[ dat$edge.face == FALSE, ] ) )
+
+
+
+best_model_cat = function(dat) {
+  # order of best-fitting poly
+  poly.order.cat = as.integer( optimize( function(i) polyfit.cat(i = i, dat = dat),
+                                           interval = c( 1, 10 ) )$minimum ) 
+  
+  if (poly.order.cat == 10) warning("Best order was 10. Increase upper limit.")
+  
+  # fit the winning model
+  lm( prop.human ~ poly(mhc, poly.order.cat, raw = TRUE) +
+        mean.emot,
+      data = dat[ dat$edge.face == FALSE, ] )
+}
+
+
+
+
+
+
+

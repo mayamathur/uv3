@@ -41,6 +41,10 @@ f2 %>% group_by(w1_sex) %>%
 
 ############################### FIT ALL UV CURVE MODELS (AGGREGATED AND TRIAL-LEVEL) ###############################
 
+# for categorization analyses
+f2$edge.face = (f2$prop.human == 0) | (f2$prop.human == 1)
+
+
 # other models we tried as sensitivity analyses: 
 # lm with robust SEs (but hard to get CI for fitted values, not just coefficients)
 # geeglm freezes up even with 10% subsample
@@ -57,12 +61,23 @@ best.agg.mods = f2 %>% group_by(w1_sex) %>%
       mhc.nadir = optimize( function(x) fitted_y(x = x,
                                                 model = best_model(dat = .),
                                                 model.type = "marginal"),
-                                          interval=c(-100, 100), maximum=FALSE)$minimum
+                                          interval=c(-100, 100), maximum=FALSE)$minimum,
+      
+      best.cat.mod = best_model_cat(dat = .),
+      boundary.mhc = optimize( function(x) abs( fitted_y( x = x,
+                                                         model = best_model_cat(dat = .),
+                                                         model.type = "marginal" )
+                                               - 0.50 ),
+                              interval=c(0, 100), maximum=FALSE)$minimum
       )
+View(best.agg.mods)
 
+# clean up columns
 best.agg.mods$mhc.nadir = unlist(best.agg.mods$mhc.nadir)
+best.agg.mods$boundary.mhc = unlist(best.agg.mods$boundary.mhc)
 
 
+##### Make Predicted Values Dataframes for Plotting ##### 
 predframes = f2 %>% group_by(w1_sex) %>%
   do( predframe = make_predframe(.)
 )
@@ -78,6 +93,7 @@ predframes$w1_sex = c( rep( "Female", nrow(predframes)/2 ),
     summarise(sex.mean = mean(mh)) )
 
 best.agg.mods$mh.nadir = best.agg.mods$mhc.nadir + sex.means.mh$sex.mean
+best.agg.mods$boundary.mh = best.agg.mods$boundary.mhc + sex.means.mh$sex.mean
 
 predframes = merge(predframes, sex.means.mh, by = "w1_sex")
 predframes$mh = predframes$mhc + predframes$sex.mean
@@ -151,229 +167,33 @@ base = ggplot(f2, aes(x = mh, y=lik) ) +
   
   geom_vline( data = best.agg.mods, 
               aes(xintercept = mh.nadir, color = "MH score at UV nadir"),
-              lty = 2, lwd = 1 )
+              lty = 2, lwd = 1 ) +
+  geom_vline( data = best.agg.mods,
+              aes(xintercept = boundary.mh, color = "Category boundary"),
+              lty = 2, lwd = 1 ) +
+  
+  scale_color_manual(name = "statistics", values = c(`Category boundary` = "blue",
+                                                     `MH score at UV nadir` = "orange")) +
+  
+  guides(color=guide_legend(title="Model estimates"))
 
 base
-
-
-# want to show the boundary location, found by reading in previously saved results
-# since that analysis happens below
-if ( TRUE ) {
-  
-  saved.res = read.csv( "res_stats.csv" )
-  ( boundary.mh = saved.res$value[ saved.res$name == "boundary.mh.agg" ] )
-  ( mh.nadir = saved.res$value[ saved.res$name == "global.min.mh.aggmodel" ] )
-
-  uv.plot.main =   base +
-    geom_vline( aes(xintercept = boundary.mh, color = "Category boundary"),
-                lty = 2, lwd = 1 )
-
-  uv.plot.main =   uv.plot.main +
-    geom_vline( aes(xintercept = mh.nadir, color = "MH score at UV nadir"),
-                lty = 2, lwd = 1 ) +
-
-    scale_color_manual(name = "statistics", values = c(`Category boundary` = "blue",
-                                                       `MH score at UV nadir` = "orange")) +
-
-    guides(color=guide_legend(title="Model estimates"))
-
-}
-
-
-# # Main-text version doesn't need the model legend
-# #uv.plot.main = base + guides(color=FALSE)
-# uv.plot.main = base
-# uv.plot.main  
 
 
 
 # save the plots
 setwd(results.dir)
-ggsave("main_uv_curve_agg.pdf",
-       plot = uv.plot.main, 
-       width = 10, 
-       height = 6)
-
-ggsave("appendix_uv_curve_agg_and_trial.pdf",
-       plot = uv.plot.app, 
-       width = 10, 
+ggsave("appendix_uv_curve_by_sex.pdf",
+       plot = base, 
+       width = 15, 
        height = 6)
 
 
 
-############################ ESTIMATE APEX AND NADIR OF UV ############################
-
-# From prereg:
-# We will use this parametric model to estimate the MH scores marking the apex and nadir of the Uncanny
-# Valley.
-
-
-
-
-
-
-
-# find the initial max
-# put them in the dataset as uncentered mh score
-res.stats = add_row( res.stats,
-                     name = c( "initial.max.mh.aggmodel", "initial.max.lik.aggmodel" ),
-                     value = optimize( function(x) fitted_y(x = x, model = best.agg.mod, model.type = "marginal"),
-                                       interval=c(-100, 0), maximum=TRUE) )
-
-res.stats = add_row( res.stats,
-                     name = c( "global.min.mh.aggmodel", "global.min.lik.aggmodel"),
-                     value = optimize( function(x) fitted_y(x = x, model = best.agg.mod, model.type = "marginal"),
-                                       interval=c(-100, 100), maximum=FALSE) )
-
-res.stats = add_row( res.stats,
-                     name = c( "global.max.mh.aggmodel", "global.max.lik.aggmodel" ),
-                     value = optimize( function(x) fitted_y(x = x, model = best.agg.mod, model.type = "marginal"),
-                                       interval=c(0, 100), maximum=TRUE) )
-
-# because optimize function creates weird lists
-res.stats$value = as.numeric( res.stats$value )
-
-# uncenter the chosen mh scores because the functions being optimized used mhc
-res.stats$value[ grepl( ".mh.", res.stats$name ) == TRUE ] = res.stats$value[ grepl( ".mh.", res.stats$name ) == TRUE ] + f2.mh.mean
-
-# all seems sensible :) 
-res.stats
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                             AIM 2. ESTIMATE CATEGORY BOUNDARY LOCATION 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-# From prereg:
-# Additionally, we will estimate the location of the category boundary
-# (i.e., the MH score at which the proportion of subjects categorizing
-# the face as “human” is closest to 50%) via polynomial regression.
-
-
-############################### RELEVANT DESCRIPTIVE STATS ###############################
-
-
-# proportion of faces that were 0% human
-res.stats = add_row( res.stats,
-                     name = "perc.faces.0perc.human",
-                     value = 100*mean( f2$prop.human == 0 ) )
-
-res.stats = add_row( res.stats,
-                     name = "n.faces.0perc.human",
-                     value = sum( f2$prop.human == 0 ) )
-
-# proportion of faces that were 100% human
-res.stats = add_row( res.stats,
-                     name = "perc.faces.100perc.human",
-                     value = 100*mean( f2$prop.human == 1 ) )
-
-res.stats = add_row( res.stats,
-                     name = "n.faces.100perc.human",
-                     value = sum( f2$prop.human == 1 ) )
-
-edge.face = (f2$prop.human == 0) | (f2$prop.human == 1)
-
-
-
-############################### FIT BOUNDARY MODEL ###############################
-
-
-##### On Aggregated Data ##### 
-
-# remove faces with zero probability since they're hard to model with poly regression
-# not weighted because here the outcome is prob. of human categorization
-
-# find order of best-fitting model
-polyfit.cat = function(i) x = AIC( lm( prop.human ~ poly(mhc, i, raw = TRUE) +
-                                         mean.emot,
-                                       data = f2[ edge.face == FALSE, ] ) )
-
-# try polys of orders 1-10
-( poly.order.cat = as.integer( optimize( polyfit.cat,
-                                         interval = c( 1, 10 ) )$minimum) )
-
-cat.mod.agg = lm( prop.human ~ poly(mhc, poly.order.cat, raw = TRUE) +
-                    mean.emot,
-                  data = f2[ edge.face == FALSE, ] )
-
-
-##### find category boundary 
-# minimize distance from fitted value and 0.50
-( boundary.mh.agg = optimize( function(x) abs( fitted_y( x = x,
-                                                         model = cat.mod.agg,
-                                                         model.type = "marginal" )
-                                               - 0.50 ),
-                              interval=c(0, 100), maximum=FALSE)$minimum + f2.mh.mean )
-# sanity check
-# should be very close to 0.50
-fitted_y( x = boundary.mh.agg - f2.mh.mean,
-          model = cat.mod.agg,
-          model.type = "marginal" )
-
-res.stats = add_row( res.stats,
-                     name = "boundary.mh.agg",
-                     value = boundary.mh.agg )
-
-
-##### sensitivity analysis: keep all faces
-cat.mod.agg.sens = lm( prop.human ~ poly(mhc, poly.order.cat, raw = TRUE) +
-                         mean.emot,
-                       data = f2 )
-
-( boundary.mh = optimize( function(x) abs( fitted_y( x = x,
-                                                     model = cat.mod.agg.sens,
-                                                     model.type = "marginal" )
-                                           - 0.50 ),
-                          interval=c(0, 100), maximum=FALSE)$minimum )
-# sanity check
-fitted_y( x = boundary.mh,
-          model = cat.mod.agg.sens,
-          model.type = "marginal" )
-
-res.stats = add_row( res.stats,
-                     name = "boundary.mh.agg.sens",
-                     value = boundary.mh )
-
-
-
-
-##### On Trial-Level Data ##### 
-
-# regular Poisson regression
-# no need to remove faces here because at individual trial level
-
-# find order of best-fitting model
-polyfit.cat = function(i) x = AIC( glm( cat.human ~ poly(mhc, i, raw = TRUE) +
-                                          mean.emot,
-                                        family = "poisson",
-                                        data = l ) )
-
-# try polys of orders 1-10
-( poly.order.cat = as.integer( optimize( polyfit.cat,
-                                         interval = c( 1, 10 ) )$minimum) )
-
-cat.mod.trial = glm( cat.human ~ poly(mhc, poly.order.cat, raw = TRUE) +
-                       mean.emot,
-                     family = "poisson",
-                     data = l )
-
-
-##### find category boundary 
-# minimize distance from fitted value and 0.50
-( boundary.mh.trial = optimize( function(x) abs( fitted_y( x = x,
-                                                           model = cat.mod.trial,
-                                                           model.type = "poisson" )
-                                                 - 0.50 ),
-                                interval=c(0, 100), maximum=FALSE)$minimum + l.mh.mean )
-
-
-# sanity check
-# manually calculate estimated probability for that 
-exp( sum( coef(cat.mod.trial) * c( 1, (boundary.mh.trial - l.mh.mean)^(1:8), 0 ) ) ) 
-
-res.stats = add_row( res.stats,
-                     name = "boundary.mh.trial",
-                     value = boundary.mh.trial )
-
 
 ############################### PLOT: MH SCORE VS. P(HUMAN CATEGORIZATION) ###############################
 
