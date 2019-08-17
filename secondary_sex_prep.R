@@ -2,6 +2,8 @@
 # Unfortunately this script has to just parallel master_prep.R
 #  since we need to re-aggregate data by subject sex. 
 
+# See "~~~" for locating the differences from the main prep script. 
+
 ############################### SET UP ###############################
 
 library(readr)
