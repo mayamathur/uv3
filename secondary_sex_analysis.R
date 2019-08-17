@@ -22,10 +22,16 @@ results.dir = paste( root.dir, "/4_Main_Experiment/Results", sep="" )
 
 setwd(code.dir)
 source("helper_overall_analysis.R")
+source("sex_helper.R")
 
 # read in face data
 setwd(data.dir)
-f2 = read.csv("face_aggregated_detailed_female.csv")
+f2 = read.csv("face_aggregated_simple_by_subject_sex.csv")
+dim(f2)  # twice the number of faces because it's by sex
+
+# sanity check: should be 0 for both sexes
+f2 %>% group_by(w1_sex) %>%
+  summarise(mean.mhc = mean(mhc))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -45,51 +51,37 @@ f2 = read.csv("face_aggregated_detailed_female.csv")
 # https://stackoverflow.com/questions/3822535/fitting-polynomial-model-to-data-in-r
 # poly function computes orthogonal polynomials
 
-# find order of best-fitting model
-polyfit = function(i) x = AIC( lm( lik ~ poly(mhc, i, raw = TRUE) +
-                                     mean.emot,
-                                   weights = 1/(f2$lik_sd^2),
-                                   data = f2) )
-# try polys of orders 1-10
-( poly.order = as.integer( optimize( polyfit,
-                                     interval = c( 1, 10 ) )$minimum) )
+# one entry per sex
+best.agg.mods = f2 %>% group_by(w1_sex) %>%
+  do( best.agg.mod = best_model(dat = .),
+      mhc.nadir = optimize( function(x) fitted_y(x = x,
+                                                model = best_model(dat = .),
+                                                model.type = "marginal"),
+                                          interval=c(-100, 100), maximum=FALSE)$minimum
+      )
 
-# fit the winning model
-poly6.agg.adj.wtd = lm( lik ~ poly(mhc, poly.order, raw = TRUE) +
-                          mean.emot,
-                        weights = 1/(f2$lik_sd^2),
-                        data = f2)
-summary(poly6.agg.adj.wtd)
-
-best.agg.mod = poly6.agg.adj.wtd
-
-# sanity check: no weighting
-poly6.agg.adj.unwtd = lm( lik ~ poly(mhc, poly.order, raw = TRUE) +
-                            mean.emot,
-                          data = f2)
+best.agg.mods$mhc.nadir = unlist(best.agg.mods$mhc.nadir)
 
 
-##### Main-Analysis GEE Models #####
+predframes = f2 %>% group_by(w1_sex) %>%
+  do( predframe = make_predframe(.)
+)
 
-# data have to be sorted by cluster var for this to work per the help
-l = l[ order(l$stim.name), ]
-
-poly6.gee.adj = gee( lik ~ poly(mhc, poly.order, raw = TRUE) +
-                       mean.emot,
-                     id = as.factor(l$stim.name), 
-                     corstr="exchangeable",
-                     data = l )
-
-##### Compare Fit of Main Analysis Models #####
-best.trial.mod = poly6.gee.adj
+# bind into a single dataset to please ggplot
+predframes = do.call( rbind, predframes$predframe )
+predframes$w1_sex = c( rep( "Female", nrow(predframes)/2 ),
+                           rep( "Male", nrow(predframes)/2 ) )
 
 
-##### Sanity-Check Model: OLS #####
+# uncenter within sex
+( sex.means.mh = f2 %>% group_by(w1_sex) %>%
+    summarise(sex.mean = mean(mh)) )
 
-# OLS (unbiased but likely wrong inference)
-poly6.lm.adj = lm( lik ~ poly(mhc, poly.order, raw = TRUE) +
-                     mean.emot,
-                   data = l )
+best.agg.mods$mh.nadir = best.agg.mods$mhc.nadir + sex.means.mh$sex.mean
+
+predframes = merge(predframes, sex.means.mh, by = "w1_sex")
+predframes$mh = predframes$mhc + predframes$sex.mean
+
 
 
 ############################ PLOT: APPENDIX UV PLOT ON BOTH DATASETS ############################# 
@@ -109,11 +101,16 @@ text.size = 14
 point.size = 3
 
 # for plotting joy
-# percent weight for each face in inverse-analysis vs. its "expected weight"
+# percent weight for each face in sex-stratified inverse-analysis vs. its "expected weight"
 #  if all faces contributed equally
-expected.wt = 1/nrow(f2)  # if all faces contributed equally
-inv.var.wt = (1/f2$lik_sd^2) / sum( (1/f2$lik_sd^2) )
-f2$rel.wt = inv.var.wt / expected.wt
+f2 = f2 %>% group_by(w1_sex) %>%
+  # numerator: face's inverse-var weight
+  # denom: face's "expected" weight if all contributed equally
+  mutate( rel.wt = ( (1/lik_sd^2) / sum( (1/lik_sd^2) ) ) / (1/n()) )
+
+# # sanity check: should be 182 within each sex
+# f2 %>% group_by(w1_sex) %>%
+#   summarise( sum(rel.wt) )
 
 # also for plotting joy
 f2$actually.human.pretty[ f2$actually.human == 1 ] = "Truly human"
@@ -122,19 +119,19 @@ f2$actually.human.pretty[ f2$actually.human == 0 ] = "Truly robot"
 
 # Base version to be customized for main text vs. appendix
 # x represents *uncentered* MH score for interpretability
-base = ggplot(f2, aes(x = mhc + f2.mh.mean, y=lik) ) +
+base = ggplot(f2, aes(x = mh, y=lik) ) +
   theme_classic() +
   
   # reference line for neutrality
   geom_hline(yintercept=0, color="gray", lwd=.6) +  
   
   # CI band for best agg model
-  geom_ribbon(data=predframe.agg,
+  geom_ribbon(data=predframes,
               aes(ymin=lwr, ymax=upr),
               alpha=0.2,
               lwd = 1.1) +  # CI band for main analysis model
-  
-  geom_line( data = predframe.agg, 
+
+  geom_line( data = predframes,
              #aes(color = "*OLS-6, agg"),
              lwd = 1, lty = 1) +
   
@@ -148,32 +145,39 @@ base = ggplot(f2, aes(x = mhc + f2.mh.mean, y=lik) ) +
   theme(text = element_text(size = text.size) ) +
   
   guides(alpha=guide_legend(title="Analysis weight")) +
-  guides(shape=guide_legend(title="Face type"))
+  guides(shape=guide_legend(title="Face type")) +
+  
+  facet_wrap(~w1_sex) +
+  
+  geom_vline( data = best.agg.mods, 
+              aes(xintercept = mh.nadir, color = "MH score at UV nadir"),
+              lty = 2, lwd = 1 )
+
 base
 
 
 # want to show the boundary location, found by reading in previously saved results
 # since that analysis happens below
-setwd(results.dir)
-if ( "res_stats.csv" %in% list.files() ) {
+if ( TRUE ) {
+  
   saved.res = read.csv( "res_stats.csv" )
   ( boundary.mh = saved.res$value[ saved.res$name == "boundary.mh.agg" ] )
   ( mh.nadir = saved.res$value[ saved.res$name == "global.min.mh.aggmodel" ] )
-  
-  uv.plot.main =   base + 
-    geom_vline( aes(xintercept = boundary.mh, color = "Category boundary"), 
+
+  uv.plot.main =   base +
+    geom_vline( aes(xintercept = boundary.mh, color = "Category boundary"),
                 lty = 2, lwd = 1 )
-  
-  uv.plot.main =   uv.plot.main + 
-    geom_vline( aes(xintercept = mh.nadir, color = "MH score at UV nadir"), 
+
+  uv.plot.main =   uv.plot.main +
+    geom_vline( aes(xintercept = mh.nadir, color = "MH score at UV nadir"),
                 lty = 2, lwd = 1 ) +
-    
+
     scale_color_manual(name = "statistics", values = c(`Category boundary` = "blue",
                                                        `MH score at UV nadir` = "orange")) +
-    
+
     guides(color=guide_legend(title="Model estimates"))
-  
-} 
+
+}
 
 
 # # Main-text version doesn't need the model legend
@@ -202,6 +206,11 @@ ggsave("appendix_uv_curve_agg_and_trial.pdf",
 # From prereg:
 # We will use this parametric model to estimate the MH scores marking the apex and nadir of the Uncanny
 # Valley.
+
+
+
+
+
 
 
 # find the initial max

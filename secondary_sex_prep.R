@@ -372,20 +372,23 @@ for ( m in med.names ) {
 
 ##### Center MH Score #####
 l$mhc = l$mh - mean(l$mh)
-f2$mhc = f2$mh - mean(f2$mh)
+
+# center within sex
+f2 = f2 %>% group_by(w1_sex) %>%
+  mutate( mhc = mh - mean(mh) )
 
 
 ##### Standardize the Mediators and Emotion #####
 
-# i.e., all variables to be used as predictors in mediation analysis
-to.standardize = c("mean.emot", med.names)
-f2[ , to.standardize ] = apply( f2[ , to.standardize ], 2, function(col) ( col - mean(col) ) / sd(col) )
-
-# also make a standardized (not just centered) version of MH score for same reason
-f2$mhz = f2$mhc / sd( f2$mh )
-
-# mediator composite
-f2$medsum = rowSums( f2[,med.names] )
+# # i.e., all variables to be used as predictors in mediation analysis
+# to.standardize = c("mean.emot", med.names)
+# f2[ , to.standardize ] = apply( f2[ , to.standardize ], 2, function(col) ( col - mean(col) ) / sd(col) )
+# 
+# # also make a standardized (not just centered) version of MH score for same reason
+# f2$mhz = f2$mhc / sd( f2$mh )
+# 
+# # mediator composite
+# f2$medsum = rowSums( f2[,med.names] )
 
 
 # for ( m in med.names ) {

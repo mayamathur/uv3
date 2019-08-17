@@ -58,10 +58,6 @@ f = read.csv("face_aggregated_detailed.csv")
 res.stats = data.frame( name = character(), 
                         value = double() )
 
-# original MH score means prior to centering
-f2.mh.mean = mean(f2$mh)
-l.mh.mean = mean(l$mh)
-
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
